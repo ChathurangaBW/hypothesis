@@ -8,7 +8,7 @@
   <style>
     :root{color-scheme:dark;--bg:#0a101b;--surface:#131d2c;--line:#263448;--text:#e8effa;--muted:#8fa1b7;--blue:#5b9bff;--teal:#3addba;--amber:#ffbe67;--red:#ff7183}
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 85% 3%,#1d3454 0,transparent 32%),var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
-    button,select{font:inherit}button{cursor:pointer}.layout{display:grid;grid-template-columns:226px minmax(0,1fr);min-height:100vh}
+    button,select,textarea{font:inherit}button{cursor:pointer}.layout{display:grid;grid-template-columns:226px minmax(0,1fr);min-height:100vh}
     aside{border-right:1px solid var(--line);background:rgba(12,19,32,.88);padding:26px 18px}.logo{display:flex;gap:10px;align-items:center;font-size:20px;font-weight:750;letter-spacing:-.5px}.mark{display:grid;place-items:center;width:34px;height:34px;background:#286d81;border-radius:10px;color:#aafbea;font-size:23px}
     .nav-head{margin:38px 10px 12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;font-size:10px}.nav{padding:10px 12px;border-radius:10px;color:var(--muted);margin:4px 0}.nav.active{background:#1b2d48;color:#d6e9ff}.nav span{margin-right:12px}
     .sidebar-footer{font-size:12px;color:var(--muted);margin-top:70px;padding:15px 10px;border-top:1px solid var(--line)}
@@ -83,12 +83,54 @@
         <div id="history" class="list muted">No runs saved yet.</div>
       </section>
     </div>
+    <section class="panel" style="margin-top:16px">
+      <h2 class="section-title">Captured workflow library</h2>
+      <p class="help">Import sanitized observations from authenticated test sessions. Use aliases for people and objects and route templates for paths. Do not include passwords, tokens, cookies, customer data or raw request bodies. Declared approval references are operator assertions, not independently verified approvals.</p>
+      <label for="capture">Workflow capture JSON</label>
+      <textarea id="capture" class="select mono" style="display:block;width:100%;min-height:220px;max-height:440px" spellcheck="false"></textarea>
+      <div class="controls">
+        <button id="example" class="run" style="width:auto">Load synthetic example</button>
+        <button id="example-violation" class="run" style="width:auto">Load synthetic self-approval</button>
+        <button id="import-capture" class="primary">Import workflow</button>
+        <button id="export-capture" class="run" style="width:auto" disabled>Export selected workflow</button>
+      </div>
+      <p id="capture-status" class="help" role="status"></p>
+      <div class="two-col">
+        <div><h3 class="section-title">Saved workflows</h3><div id="workflows" class="list"></div></div>
+        <div><h3 class="section-title">Observed transitions</h3><div id="capture-graph" class="chain muted">Select or import a workflow.</div></div>
+      </div>
+      <details style="margin-top:16px"><summary>Graph and source observations</summary><pre id="capture-detail" class="mono">No workflow selected.</pre></details>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <h2 class="section-title">Independent invariant review</h2>
+      <p class="help">Compare a selected workflow against rules supplied from an approved role matrix or business specification. The operator asserts rule authority. A successful response only becomes a candidate finding when it contradicts an explicit rule; missing and ambiguous evidence stays unverified.</p>
+      <label for="policy">Invariant policy JSON</label>
+      <textarea id="policy" class="select mono" style="display:block;width:100%;min-height:230px;max-height:440px" spellcheck="false" placeholder="Select a saved workflow, then paste a version-bound invariant policy."></textarea>
+      <div class="controls">
+        <button id="example-policy" class="run" style="width:auto" disabled>Load synthetic SOD rule</button>
+        <button id="assess" class="primary" disabled>Evaluate saved observations</button>
+      </div>
+      <p id="assessment-status" class="help" role="status">Select a saved workflow first.</p>
+      <div class="two-col">
+        <div><h3 class="section-title">Assessments for selected workflow</h3><div id="assessment-history" class="list muted">No workflow selected.</div></div>
+        <div><h3 class="section-title">Invariant outcomes</h3><div id="assessment-results" class="list muted">No assessment selected.</div></div>
+      </div>
+      <details style="margin-top:16px"><summary>Policy, evidence references and reviewer queue</summary><pre id="assessment-detail" class="mono">No assessment selected.</pre></details>
+    </section>
   </main>
 </div>
 <script>
   const el = id => document.getElementById(id);
   const asText = (parent, tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if(cls)n.className=cls;parent.append(n);return n; };
-  async function json(url, options) { const r = await fetch(url, options); if(!r.ok) throw new Error('Request failed ('+r.status+')'); return r.json(); }
+  async function json(url, options) {
+    const r = await fetch(url, options);
+    if(!r.ok) {
+      let message = 'Request failed ('+r.status+')';
+      try { const body=await r.json(); message=Array.isArray(body.detail)?body.detail.map(e=>e.loc.join('.')+': '+e.msg).join('; '):(body.detail||message); } catch {}
+      throw new Error(message);
+    }
+    return r.json();
+  }
   async function showRun(data) {
     el('executed').textContent = data.summary.hypotheses;
     el('potential').textContent = data.summary.potential_findings;
@@ -130,6 +172,113 @@
   });
   json('/api/model').then(model=>{el('invariants').textContent=model.graph.invariants.length;}).catch(()=>{});
   history().catch(e=>{el('history').textContent='Cannot load saved runs: '+e.message;});
+  let selectedWorkflow = null;
+  function showWorkflow(record) {
+    selectedWorkflow=record;
+    el('export-capture').disabled=false;
+    el('example-policy').disabled=record.source.scope.environment!=='synthetic';
+    el('assess').disabled=false;
+    el('policy').value='';
+    el('assessment-detail').textContent='No assessment selected.';
+    el('assessment-results').textContent='No assessment selected.';
+    el('capture-detail').textContent=JSON.stringify(record,null,2);
+    const graph=record.graph, labels=new Map(graph.nodes.map(n=>[n.id,n.label]));
+    const root=el('capture-graph');root.replaceChildren();
+    const transitions=graph.edges.filter(e=>e.label==='observed_transition');
+    for(const edge of transitions) {
+      const item=asText(root,'div',labels.get(edge.from)+' → '+labels.get(edge.to),'node');
+      asText(item,'small','Observations: '+edge.evidence.join(', '),'muted');
+    }
+    if(!transitions.length)asText(root,'p','No successful state transitions captured.','muted');
+    asText(root,'p',graph.note,'help');
+    el('capture-status').textContent=record.name+' · '+record.summary.sessions+' sessions · '+record.summary.observations+' observations · '+record.summary.nodes+' nodes · fingerprint '+record.source_sha256.slice(0,12);
+    el('assessment-status').textContent='Selected '+record.name+'. Supply reviewer-approved business invariants before evaluating.';
+    assessments(record.id).catch(e=>{el('assessment-status').textContent=e.message;});
+  }
+  function showAssessment(record) {
+    const root=el('assessment-results');root.replaceChildren();
+    for(const result of record.evaluations) {
+      const item=document.createElement('div');item.className='finding';
+      const head=document.createElement('div');head.className='finding-head';
+      asText(head,'div',result.title,'finding-title');
+      const badge=asText(head,'span',result.outcome.replaceAll('_',' '),'pill');
+      if(result.outcome==='potential_violation')badge.className='pill bad';
+      if(result.outcome==='protected')badge.className='pill ok';
+      item.append(head);
+      asText(item,'p',result.rule_id+' · observation IDs: '+(result.evidence.observation_ids.join(', ')||'none'));
+      root.append(item);
+    }
+    el('assessment-detail').textContent=JSON.stringify(record,null,2);
+    el('assessment-status').textContent=record.findings.length+' candidate finding(s) require independent human validation. '+record.summary.not_tested+' rule(s) not tested; '+record.summary.inconclusive+' inconclusive.';
+  }
+  async function assessments(workflowId) {
+    const history=await json('/api/workflows/'+encodeURIComponent(workflowId)+'/assessments');
+    if(!selectedWorkflow || selectedWorkflow.id!==workflowId)return;
+    const root=el('assessment-history');root.replaceChildren();
+    if(!history.length)asText(root,'p','No invariant assessments yet.','muted');
+    for(const record of history) {
+      const button=asText(root,'button',record.summary.potential_violation+' candidates · '+record.summary.protected+' protected','run');
+      asText(button,'small',new Date(record.created_at).toLocaleString()+' · '+record.id.slice(0,8));
+      button.addEventListener('click',async()=>{
+        try{showAssessment(await json('/api/assessments/'+encodeURIComponent(record.id)));}
+        catch(e){el('assessment-status').textContent=e.message;}
+      });
+    }
+  }
+  async function workflows() {
+    const records=await json('/api/workflows');
+    const root=el('workflows');root.replaceChildren();
+    if(!records.length)asText(root,'p','No captured workflows yet. Load the example to try an import.','muted');
+    for(const record of records) {
+      const button=asText(root,'button',record.name,'run');
+      asText(button,'small',record.summary.observations+' observations · '+new Date(record.created_at).toLocaleString());
+      button.addEventListener('click',async()=>{try{showWorkflow(await json('/api/workflows/'+encodeURIComponent(record.id)));}catch(e){el('capture-status').textContent=e.message;}});
+    }
+  }
+  el('example').addEventListener('click',async()=>{
+    try{el('capture').value=JSON.stringify(await json('/api/workflows/example'),null,2);el('capture-status').textContent='Synthetic example loaded. Select Import workflow to save it.';}
+    catch(e){el('capture-status').textContent=e.message;}
+  });
+  el('example-violation').addEventListener('click',async()=>{
+    try{el('capture').value=JSON.stringify(await json('/api/workflows/example?scenario=self_approval'),null,2);el('capture-status').textContent='Synthetic self-approval loaded. Import it, then load the synthetic SOD rule and evaluate.';}
+    catch(e){el('capture-status').textContent=e.message;}
+  });
+  el('import-capture').addEventListener('click',async()=>{
+    const button=el('import-capture');button.disabled=true;
+    try {
+      const source=JSON.parse(el('capture').value);
+      showWorkflow(await json('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(source)}));
+      await workflows();
+    } catch(e){el('capture-status').textContent='Import failed: '+e.message;}
+    finally{button.disabled=false;}
+  });
+  el('export-capture').addEventListener('click',()=>{
+    if(!selectedWorkflow)return;
+    const url=URL.createObjectURL(new Blob([JSON.stringify(selectedWorkflow,null,2)],{type:'application/json'}));
+    const link=document.createElement('a');link.href=url;link.download='workflow-'+selectedWorkflow.id+'.json';link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+  el('example-policy').addEventListener('click',async()=>{
+    if(!selectedWorkflow)return;
+    try{
+      const data=await json('/api/workflows/'+encodeURIComponent(selectedWorkflow.id)+'/policy-example');
+      el('policy').value=JSON.stringify(data,null,2);
+      el('assessment-status').textContent='Synthetic draft loaded. Evaluate this workflow against the asserted rule; synthetic self-approval should produce a candidate finding.';
+    }catch(e){el('assessment-status').textContent=e.message;}
+  });
+  el('assess').addEventListener('click',async()=>{
+    if(!selectedWorkflow)return;
+    const button=el('assess'), workflowId=selectedWorkflow.id;button.disabled=true;
+    try{
+      const policy=JSON.parse(el('policy').value);
+      const record=await json('/api/workflows/'+encodeURIComponent(workflowId)+'/assessments',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(policy)});
+      showAssessment(record);
+      await assessments(workflowId);
+    }catch(e){el('assessment-status').textContent='Evaluation failed: '+e.message;}
+    finally{button.disabled=false;}
+  });
+  workflows().catch(e=>{el('capture-status').textContent=e.message;});
 </script>
 </body>
 </html>
