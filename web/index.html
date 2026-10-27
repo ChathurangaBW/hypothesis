@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>Hypothesis · Stateful Security Investigation</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a101b;--surface:#131d2c;--line:#263448;--text:#e8effa;--muted:#8fa1b7;--blue:#5b9bff;--teal:#3addba;--amber:#ffbe67;--red:#ff7183}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 85% 3%,#1d3454 0,transparent 32%),var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+    button,select{font:inherit}button{cursor:pointer}.layout{display:grid;grid-template-columns:226px minmax(0,1fr);min-height:100vh}
+    aside{border-right:1px solid var(--line);background:rgba(12,19,32,.88);padding:26px 18px}.logo{display:flex;gap:10px;align-items:center;font-size:20px;font-weight:750;letter-spacing:-.5px}.mark{display:grid;place-items:center;width:34px;height:34px;background:#286d81;border-radius:10px;color:#aafbea;font-size:23px}
+    .nav-head{margin:38px 10px 12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;font-size:10px}.nav{padding:10px 12px;border-radius:10px;color:var(--muted);margin:4px 0}.nav.active{background:#1b2d48;color:#d6e9ff}.nav span{margin-right:12px}
+    .sidebar-footer{font-size:12px;color:var(--muted);margin-top:70px;padding:15px 10px;border-top:1px solid var(--line)}
+    main{padding:35px 45px 70px;max-width:1560px;width:100%;margin:0 auto}.overline{font-size:11px;text-transform:uppercase;color:var(--teal);letter-spacing:2px;font-weight:700}.heading{display:flex;justify-content:space-between;gap:16px;align-items:center}.heading h1{font-size:32px;letter-spacing:-1.3px;margin:9px 0 6px}.sub{color:var(--muted);margin:0 0 27px;max-width:790px}
+    .tag{border:1px solid #3b5b68;background:#17343e;color:#93ecdc;font-size:11px;padding:5px 9px;border-radius:100px;white-space:nowrap}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px}.panel{background:linear-gradient(155deg,#182437,#121b2b);border:1px solid var(--line);border-radius:14px;padding:22px;min-width:0}
+    .stat-title{font-size:12px;color:var(--muted)}.stat-value{font-size:34px;font-weight:700;letter-spacing:-1.1px;margin:9px 0 5px}.stat-note{font-size:11px;color:var(--muted)}.stat-value.good{color:var(--teal)}.stat-value.warn{color:var(--amber)}
+    .two-col{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;margin-top:16px}.section-title{font-size:16px;font-weight:650;margin:0 0 15px}.help{color:var(--muted);font-size:12px;margin:0 0 17px}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:20px}.select{background:#0b1524;border:1px solid #35455c;border-radius:9px;padding:11px 12px;color:var(--text);flex:1;min-width:180px}.primary{background:#347eef;border:1px solid #5b96ed;color:white;font-weight:650;padding:11px 16px;border-radius:9px}.primary:disabled{opacity:.5;cursor:wait}
+    .notice{border:1px solid #4b4126;background:#282217;color:#f4d18f;border-radius:9px;padding:12px 14px;font-size:12px}.chain{display:flex;flex-direction:column;gap:8px}.node{border:1px solid #35475c;background:#0d1725;border-radius:10px;padding:12px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px}.node-title{font-weight:650}.node-sub{color:var(--muted);font-size:11px}.arrow{text-align:center;color:#597b9f;line-height:9px}
+    .pill{font-size:10px;border-radius:40px;padding:4px 9px;background:#24354d;color:#bdd6f7}.pill.bad{background:#482733;color:#ff98a7}.pill.ok{background:#17433b;color:#8ce9c9}
+    .finding{padding:15px 0;border-top:1px solid var(--line)}.finding:first-child{border-top:0;padding-top:0}.finding-head{display:flex;justify-content:space-between;gap:12px}.finding-title{font-weight:650}.finding p{margin:6px 0 0;color:var(--muted);font-size:12px}
+    .mono{font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#091321;padding:14px;border:1px solid var(--line);border-radius:10px;color:#bdd0e8;max-height:320px}.evidence{margin-top:16px}.muted{color:var(--muted)}.error{color:#ff9da8}
+    .list{display:grid;gap:9px}.run{padding:11px 13px;border:1px solid var(--line);border-radius:9px;background:#0d1826;cursor:pointer;color:var(--text);text-align:left;width:100%}.run:hover{border-color:var(--blue)}.run small{display:block;color:var(--muted);margin-top:3px}
+    @media(max-width:1100px){.two-col{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:730px){.layout{display:block}aside{padding:15px;border-right:0;border-bottom:1px solid var(--line)}aside .nav-head,aside .nav,aside .sidebar-footer{display:none}main{padding:24px 18px}.heading{align-items:start;flex-direction:column}.heading h1{font-size:27px}.stats{gap:9px}.panel{padding:16px}.stat-value{font-size:27px}}
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="logo"><div class="mark">◇</div> Hypothesis</div>
+    <div class="nav-head">Workspace</div>
+    <div class="nav active"><span>▦</span> Overview</div>
+    <div class="nav"><span>⌘</span> Workflow graph</div>
+    <div class="nav"><span>◎</span> Hypotheses</div>
+    <div class="nav"><span>▤</span> Evidence ledger</div>
+    <div class="sidebar-footer">v0.1.0 · Offline-first prototype<br>Live target connectivity disabled</div>
+  </aside>
+  <main>
+    <div class="overline">Stateful Application Security Research</div>
+    <div class="heading"><h1>Investigation workspace</h1><span class="tag">● OFFLINE SYNTHETIC ONLY</span></div>
+    <p class="sub">Understand workflows. Generate invariant-driven hypotheses. Reproduce authorization failures with controlled, isolated tests. This demo never sends a request to a banking system.</p>
+    <div class="stats">
+      <div class="panel"><div class="stat-title">Workflow invariants</div><div id="invariants" class="stat-value">2</div><div class="stat-note">Ownership and maker/checker</div></div>
+      <div class="panel"><div class="stat-title">Hypotheses executed</div><div id="executed" class="stat-value">0</div><div class="stat-note">Stateful evidence-backed tests</div></div>
+      <div class="panel"><div class="stat-title">Potential findings</div><div id="potential" class="stat-value warn">0</div><div class="stat-note">Require human verification</div></div>
+      <div class="panel"><div class="stat-title">Protected invariants</div><div id="passed" class="stat-value good">0</div><div class="stat-note">Expected denial verified</div></div>
+    </div>
+    <div class="two-col">
+      <section class="panel">
+        <h2 class="section-title">Hypothesis execution</h2>
+        <p class="help">Both scenarios use the same application state graph and identities. Compare a correctly enforced workflow against one with seeded authorization bugs.</p>
+        <div class="controls">
+          <select id="scenario" class="select" aria-label="Synthetic scenario"><option value="vulnerable">Vulnerable synthetic bank</option><option value="secure">Secure synthetic bank</option></select>
+          <button id="start" class="primary">▶ Run investigation</button>
+        </div>
+        <div class="notice">Safety boundary: deterministic local simulator only. No exploit payloads, external target URLs or unapproved network requests.</div>
+        <h3 class="section-title" style="margin-top:24px">Findings</h3>
+        <div id="findings" class="muted">Run an investigation to populate findings.</div>
+        <div class="evidence">
+          <h3 class="section-title">Reproducible evidence</h3>
+          <pre id="evidence" class="mono">No execution traces yet.</pre>
+          <p id="verification" class="help" aria-live="polite"></p>
+        </div>
+      </section>
+      <section class="panel">
+        <h2 class="section-title">Banking workflow model</h2>
+        <p class="help">Explicit roles, lifecycle transitions, and expected authorization invariants.</p>
+        <div class="chain">
+          <div class="node"><div><div class="node-title">Maker</div><div class="node-sub">Creates synthetic payment</div></div><span class="pill">Role</span></div>
+          <div class="arrow">↓</div>
+          <div class="node"><div><div class="node-title">Draft payment</div><div class="node-sub">Initiator attached to object</div></div><span class="pill">State 1</span></div>
+          <div class="arrow">↓</div>
+          <div class="node"><div><div class="node-title">Pending approval</div><div class="node-sub">Submitted, awaiting checker</div></div><span class="pill">State 2</span></div>
+          <div class="arrow">↓</div>
+          <div class="node"><div><div class="node-title">Checker</div><div class="node-sub">Must be a different principal</div></div><span class="pill">Invariant</span></div>
+          <div class="arrow">↓</div>
+          <div class="node"><div><div class="node-title">Approved payment</div><div class="node-sub">Only after separation-of-duties check</div></div><span class="pill">State 3</span></div>
+        </div>
+        <h3 class="section-title" style="margin-top:26px">Recent runs</h3>
+        <div id="history" class="list muted">No runs saved yet.</div>
+      </section>
+    </div>
+  </main>
+</div>
+<script>
+  const el = id => document.getElementById(id);
+  const asText = (parent, tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if(cls)n.className=cls;parent.append(n);return n; };
+  async function json(url, options) { const r = await fetch(url, options); if(!r.ok) throw new Error('Request failed ('+r.status+')'); return r.json(); }
+  async function showRun(data) {
+    el('executed').textContent = data.summary.hypotheses;
+    el('potential').textContent = data.summary.potential_findings;
+    el('passed').textContent = data.summary.passed;
+    const findings = el('findings'); findings.replaceChildren();
+    if (!data.findings.length) asText(findings, 'p', 'No invariant violations detected in this synthetic scenario.', 'muted');
+    for (const f of data.findings) {
+      const item = document.createElement('div'); item.className='finding';
+      const head = document.createElement('div'); head.className='finding-head';
+      asText(head,'div', f.title,'finding-title');
+      asText(head,'span',f.risk.toUpperCase(),'pill bad');
+      item.append(head);
+      asText(item,'p',f.workflow+' · '+f.status.replaceAll('_',' '));
+      findings.append(item);
+    }
+    el('evidence').textContent = JSON.stringify(data.observations.map(o=>o.evidence), null, 2);
+    const verification = await json('/api/runs/'+encodeURIComponent(data.id)+'/verify');
+    el('verification').textContent = 'Run '+data.id.slice(0,8)+' · hash chain: '+(verification.verified?'verified':'FAILED')+' (not immutable/WORM evidence)';
+  }
+  async function history() {
+    const runs = await json('/api/runs');
+    const root=el('history');root.replaceChildren();
+    if(!runs.length){asText(root,'p','No runs saved yet.','muted');return;}
+    for (const run of runs) {
+      const b = document.createElement('button');b.className='run';
+      asText(b,'strong',run.scenario.toUpperCase()+' · '+run.summary.potential_findings+' potential finding(s)');
+      asText(b,'small',new Date(run.created_at).toLocaleString()+' · '+run.id.slice(0,8));
+      b.addEventListener('click',async()=>{try{await showRun(await json('/api/runs/'+encodeURIComponent(run.id)));}catch(e){el('verification').textContent=e.message;}});
+      root.append(b);
+    }
+  }
+  el('start').addEventListener('click',async()=>{
+    const button=el('start');button.disabled=true;button.textContent='Running…';
+    try {
+      const data=await json('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:el('scenario').value})});
+      await showRun(data);await history();
+    } catch(e){el('verification').textContent='Error: '+e.message;}
+    finally{button.disabled=false;button.textContent='▶ Run investigation';}
+  });
+  json('/api/model').then(model=>{el('invariants').textContent=model.graph.invariants.length;}).catch(()=>{});
+  history().catch(e=>{el('history').textContent='Cannot load saved runs: '+e.message;});
+</script>
+</body>
+</html>
