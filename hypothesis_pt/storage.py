@@ -28,6 +28,15 @@ class RunStore:
                 run_id TEXT UNIQUE NOT NULL, previous_sha TEXT NOT NULL,
                 entry_sha TEXT NOT NULL, FOREIGN KEY(run_id) REFERENCES runs(id)
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS workflows (
+                id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+                payload TEXT NOT NULL, payload_sha TEXT NOT NULL
+            )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS assessments (
+                id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                payload TEXT NOT NULL, payload_sha TEXT NOT NULL,
+                FOREIGN KEY(workflow_id) REFERENCES workflows(id)
+            )""")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path, timeout=10)
@@ -51,6 +60,79 @@ class RunStore:
             {"id": row[0], "created_at": row[1], "scenario": row[2], "summary": json.loads(row[3])["summary"]}
             for row in rows
         ]
+
+    def save_workflow(self, record: dict[str, Any]) -> None:
+        with self._connect() as db:
+            db.execute("INSERT INTO workflows VALUES (?, ?, ?, ?)", (
+                record["id"], record["created_at"],
+                json.dumps(record, sort_keys=True, separators=(",", ":")), digest(record),
+            ))
+
+    def list_workflows(self) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute("SELECT id, payload, payload_sha FROM workflows "
+                              "ORDER BY created_at DESC LIMIT 100").fetchall()
+        records = [self._verified_payload(payload, sha, "workflow")
+                   for _, payload, sha in rows]
+        if any(record.get("id") != row[0] for record, row in zip(records, rows)):
+            raise ValueError("Stored workflow failed its integrity check")
+        return [{key: record[key] for key in ("id", "created_at", "name", "summary")}
+                for record in records]
+
+    def get_workflow(self, workflow_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT payload, payload_sha FROM workflows WHERE id=?", (workflow_id,)).fetchone()
+        if row is None:
+            return None
+        try:
+            record = json.loads(row[0])
+            valid = digest(record) == row[1] and record["id"] == workflow_id
+        except (ValueError, KeyError, TypeError):
+            valid = False
+        if not valid:
+            raise ValueError("Stored workflow failed its integrity check")
+        return record
+
+    def save_assessment(self, record: dict[str, Any]) -> None:
+        with self._connect() as db:
+            db.execute("INSERT INTO assessments VALUES (?, ?, ?, ?, ?)", (
+                record["id"], record["workflow_id"], record["created_at"],
+                json.dumps(record, sort_keys=True, separators=(",", ":")), digest(record),
+            ))
+
+    def list_assessments(self, workflow_id: str | None = None) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            if workflow_id is None:
+                rows = db.execute("SELECT payload, payload_sha FROM assessments "
+                                  "ORDER BY created_at DESC LIMIT 100").fetchall()
+            else:
+                rows = db.execute("SELECT payload, payload_sha FROM assessments "
+                                  "WHERE workflow_id=? ORDER BY created_at DESC LIMIT 100",
+                                  (workflow_id,)).fetchall()
+        records = [self._verified_payload(payload, sha, "assessment") for payload, sha in rows]
+        return [{key: record[key] for key in ("id", "workflow_id", "created_at", "summary")}
+                for record in records]
+
+    @staticmethod
+    def _verified_payload(payload: str, sha: str, kind: str) -> dict[str, Any]:
+        try:
+            record = json.loads(payload)
+            if not isinstance(record, dict) or digest(record) != sha:
+                raise ValueError("integrity mismatch")
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Stored {kind} failed its integrity check") from exc
+        return record
+
+    def get_assessment(self, assessment_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT payload, payload_sha FROM assessments WHERE id=?",
+                             (assessment_id,)).fetchone()
+        if row is None:
+            return None
+        record = self._verified_payload(row[0], row[1], "assessment")
+        if record.get("id") != assessment_id:
+            raise ValueError("Stored assessment failed its integrity check")
+        return record
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
