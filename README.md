@@ -1,86 +1,113 @@
 # Hypothesis
 
-**A workflow-aware, security-invariant-driven penetration-testing research platform.**
+**Application-aware security investigation using workflow models, security invariants, controlled experiments and verifiable evidence.**
 
-Version 0.1 is a runnable **offline synthetic prototype**. It models a bank's state transitions, generates testable security hypotheses, executes multi-step checks with separate identities, records reproducible traces, and stores tamper-evident evidence in SQLite.
+## Current version: 0.2
 
-> **Not a production pentesting agent.** It does not connect to any external applications, invoke ZAP or MobSF, carry out real money movements, or guarantee regulatory-compliant VAPT delivery. There is no live target execution endpoint. Every potential finding requires human validation.
+Hypothesis is a working self-hosted research prototype, **not a complete autonomous bank-grade penetration testing product**. It includes offline multi-step banking workflow tests, API specification intelligence, an optional local AI hypothesis planner, and an opt-in **read-only** check engine for explicitly approved test environments. Active testing is **OFF by default**.
 
-## Get running
+### Included
+
+- **Synthetic stateful banking PT:** Cross-account BOLA/IDOR and maker/checker separation-of-duties tests, with both secure and seeded-vulnerable workflows.
+- **OpenAPI and Postman import:** Normalizes method, route, tags and safe labels, discarding request bodies, authentication material, server URLs and samples.
+- **Business-aware hypothesis planning:** Proposes object-level authorization, function authorization, transaction invariants, state transitions and maker/checker checks for manual review. This is not a vulnerability scan.
+- **Optional local AI reasoning:** A local Ollama-compatible inference server can suggest candidates from reduced route metadata. It cannot run network tools and its proposals are unverified.
+- **Staging-only read authorization checks:** Administrator-owned local ROE manifest, HTTPS origin, literal allowlisted GET paths, environment-based test-account tokens, explicit opt-in and operator approval token.
+- **Evidence review:** Response-code observations and bounded response fingerprints, no response bodies or bearer tokens in the evidence database.
+- **Dashboard + API:** FastAPI control plane and responsive browser interface.
+- **Run history + hash chain:** SQLite persistence with integrity verification. Hash chaining is *not* immutable audit storage or legal evidence certification.
+- **CI tests:** Offline deterministic tests, mock transports for staging checks, fail-closed policy tests.
+
+### Installation
 
 Requires Python 3.11+.
 
 ```bash
 git clone https://github.com/ChathurangaBW/hypothesis.git
 cd hypothesis
+git checkout feat/stateful-pt-mvp
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+python -m pytest -q
 hypothesis-pt serve
 ```
 
-Open **http://127.0.0.1:8000**. Select *Vulnerable synthetic bank* and click **Run investigation**. The demo should flag two seeded violations: cross-customer account access (BOLA/IDOR) and maker/checker separation-of-duties failure. Select *Secure synthetic bank* and confirm no violations.
+Open **http://127.0.0.1:8000**. The dashboard defaults to the isolated synthetic banking environment and can be used without a model API key.
 
-Command-line mode:
+CLI demo:
 
 ```bash
 hypothesis-pt demo vulnerable
 hypothesis-pt demo secure
-python -m pytest -q
 ```
 
-Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
+Windows PowerShell: `.venv\\Scripts\\Activate.ps1`.
 
-## How it works
+### Import a specification
 
-```text
-Explicit workflow graph + business invariants
-                  |
-           Hypothesis planner
-                  |
-           Stateful test engine
-                  |
-        Isolated synthetic bank
-                  |
-       Expected vs actual oracle
-                  |
-  Evidence fingerprint + chained ledger
-                  |
-          Human validation queue
+In the dashboard, choose an **OpenAPI JSON** or **Postman collection JSON** file. Click **Import**, then **Plan**. This produces a bounded candidate list for ownership, state transitions, maker/checker and administrative authorization. It **does not** execute the candidate hypotheses against targets.
+
+### Optional local AI hypothesis proposals
+
+Install and run an Ollama-compatible service bound to loopback. Only route metadata (method, path and category) is passed to the local model. Do not import confidential bank specifications on an unapproved workstation.
+
+```bash
+export HYPOTHESIS_ALLOW_LOCAL_AI=1
+export HYPOTHESIS_LOCAL_MODEL_URL=http://127.0.0.1:11434
+export HYPOTHESIS_LOCAL_MODEL=llama3.1
+hypothesis-pt serve
 ```
 
-The initial graph has two hard-coded invariants:
+Choose **Local AI** after importing a specification. The model produces up to 12 suggestions limited to known operations, with no execution privileges. Verify the model and its dependencies are downloaded and approved for use before attempting this.
 
-- **INV-OWNERSHIP:** one customer must not access another customer's account.
-- **INV-SOD:** a payment initiator must not approve the same payment, even after switching from maker to checker role.
+### Opt-in staging GET authorization checks (advanced)
 
-The second hypothesis performs an actual **three-step stateful test**: create a payment as maker, submit it, then attempt approval as the same principal under a checker role. The simulator deliberately contains this bug in *vulnerable* mode.
+This runs actual HTTP GET requests only when explicitly enabled. Confirm your **signed Rules of Engagement**, approved synthetic test accounts, test target, access windows and local data handling arrangements.
 
-## API
+1. Copy `examples/staging-engagement.example.json` to a private location outside GitHub. Replace the placeholder HTTPS origin, test-only path, approval reference and identity names. Every path must be a literal allowed GET resource and use **test data**, not real customer information.
+2. Define the test identity bearer token in an environment variable. Do not commit secrets, tokens or evidence.
+3. Explicitly enable execution and set a long local operator approval token.
 
-- `GET /` — dashboard.
-- `GET /api/health` — execution capabilities.
-- `GET /api/model` — workflow graph and generated hypotheses.
-- `POST /api/runs` — only `{"scenario": "secure"}` or `{"scenario": "vulnerable"}`.
-- `GET /api/runs` — last 100 run summaries.
-- `GET /api/runs/{id}` — execution traces and potential findings.
-- `GET /api/runs/{id}/verify` — hash-chain integrity check.
+```bash
+export HYPOTHESIS_ENGAGEMENT_PATH=/private/path/approved-roe.json
+export HYPOTHESIS_TOKEN_TEST_USER_B='redacted-test-only-token'
+export HYPOTHESIS_ENABLE_READONLY_PT=1
+export HYPOTHESIS_ROE_APPROVED=1
+export HYPOTHESIS_ADMIN_TOKEN='generate-a-long-random-operator-approval-token'
+hypothesis-pt serve
+```
 
-SQLite file location: `HYPOTHESIS_DB` environment variable, default `./data/hypothesis.sqlite3`. Never store real bank credentials or customer data in this database.
+Execution is still blocked until the local operator supplies the approval token in the dashboard. Only manifest-listed HTTPS GET routes are executed, sequentially, without following redirects, proxies or saving response bodies. Unexpected successful access is a **potential** violation for human validation, not a confirmed vulnerability.
 
-## Boundaries
+**Run locally.** By default the server binds to `127.0.0.1`. The prototype has no production user accounts, tenant separation, TLS termination or robust rate-limiting across concurrent clients. Do **not** expose it to an untrusted network. Real bank production testing, payment operations, mobile instrumentation and uncontrolled autonomous exploitation are not supported.
 
-1. The current engine has **no network access to targets**, no arbitrary command execution and no endpoint for user-defined URLs.
-2. Evidence hashes form a **tamper-evident chain**, not immutable logs. Production use requires append-only off-host storage, signature/attestation and operational retention rules.
-3. A red-team operator must approve target scope, identities, test windows, safe operations and inference/data residency before real adapters are added.
-4. An AI-generated hypothesis alone is not a confirmed vulnerability. Finding reports deliberately carry `requires_human_validation`.
+### API overview
 
-## Next milestones
+| Route | Purpose |
+|---|---|
+| `GET /` | Local dashboard |
+| `GET /api/model` | Synthetic workflow graph and invariants |
+| `POST /api/runs` | Secure/vulnerable offline demo |
+| `GET /api/runs` | List runs |
+| `GET /api/runs/{id}` | Evidence and findings |
+| `GET /api/runs/{id}/verify` | Chained evidence integrity check |
+| `POST /api/specs` | OpenAPI/Postman JSON import |
+| `GET /api/specs` | Sanitized workspaces |
+| `GET /api/specs/{id}/hypotheses` | Deterministic hypothesis candidates |
+| `POST /api/specs/{id}/reason` | Opt-in local model suggestions |
+| `GET /api/engagement` | Sanitized local ROE configuration status |
+| `POST /api/engagement/execute` | Approved, allowlisted staging GET checks only |
 
-1. Authenticated workflow capture to produce a typed graph from **approved test environments**.
-2. External security-invariant configuration, role matrix and expected-state oracle.
-3. Sandboxed test adapter with explicit per-operation authorizations, deterministic fixtures, approval queues, rate limits and emergency stop.
-4. Model-assisted hypothesis ranking with locally approved inference, isolated from credentials.
-5. Peer review, reporting and retest management after validation.
+The full OpenAPI API reference is at `http://127.0.0.1:8000/docs`.
 
-See `/docs` for the interactive OpenAPI reference.
+## What is not yet complete
+
+- Browser/transaction workflow capture, parameter-aware replay and dynamic role modeling for arbitrary real applications.
+- General multi-step **live** PT execution of payment state transitions.
+- Security policy oracles driven by verified bank business specifications.
+- Mobile dynamic-analysis adapters, isolated workers, operator SSO and independent reviewer sign-off.
+- Production immutable logs, evidentiary chain of custody, encryption and bank-specific regulatory attestation.
+- Proof that the platform can find unknown real-world banking logic vulnerabilities reliably.
+
+Treat this as a testable platform foundation, **not a substitute for the required qualified manual VAPT engagement**.

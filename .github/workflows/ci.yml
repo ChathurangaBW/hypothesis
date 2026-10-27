@@ -14,3 +14,9 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q
+      - name: Verify packaged dashboard
+        run: python -c "from pathlib import Path; import hypothesis_pt; p=Path(hypothesis_pt.__file__).parent/'static'/'index.html'; assert p.exists(); assert 'spec-import' in p.read_text(); print('dashboard packaged')"
+      - name: Verify dashboard JavaScript syntax
+        run: |
+          python -c "from pathlib import Path; s=Path('hypothesis_pt/static/index.html').read_text(); Path('/tmp/hypothesis-ui.js').write_text(s.split('<script>',1)[1].split('</script>',1)[0])"
+          node --check /tmp/hypothesis-ui.js

@@ -1,0 +1,16 @@
+{
+  "title": "Synthetic UAT authorization verification",
+  "base_url": "https://staging.example.test",
+  "environment": "UAT",
+  "approved_by": "Named authorized security contact",
+  "approval_reference": "SIGNED-ROE-REFERENCE",
+  "probes": [
+    {
+      "id": "ACCOUNT-OWNER-01",
+      "path": "/api/accounts/TEST-ACCOUNT-A",
+      "requester_profile": "TEST_USER_B",
+      "expected_denial_statuses": [401, 403, 404],
+      "description": "Test user B must not read test user A's account"
+    }
+  ]
+}

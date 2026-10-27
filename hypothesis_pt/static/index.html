@@ -83,7 +83,37 @@
         <div id="history" class="list muted">No runs saved yet.</div>
       </section>
     </div>
-  </main>
+  
+    <div class="two-col">
+      <section class="panel">
+        <h2 class="section-title">Application intelligence</h2>
+        <p class="help">Import OpenAPI/Postman JSON. The importer discards sample payloads, tokens and server URLs. Generated candidates require human review.</p>
+        <div class="controls">
+          <select id="spec-source" class="select"><option value="openapi">OpenAPI</option><option value="postman">Postman</option></select>
+          <input id="spec-file" class="select" type="file" accept=".json,application/json" aria-label="API specification file">
+          <button id="spec-import" class="primary" type="button">Import</button>
+        </div>
+        <p id="spec-status" class="help" aria-live="polite">No specification imported.</p>
+        <div class="controls">
+          <select id="spec-choice" class="select" aria-label="Imported specifications"></select>
+          <button id="spec-plan" class="primary" type="button">Plan</button>
+          <button id="spec-reason" class="primary" type="button">Local AI</button>
+        </div>
+        <pre id="spec-output" class="mono">Load a JSON specification to generate workflow-aware candidate hypotheses.</pre>
+      </section>
+      <section class="panel">
+        <h2 class="section-title">Approved staging checks</h2>
+        <p class="help">Read-only, administrator-scoped GET authorization checks. No arbitrary URLs or mutation requests.</p>
+        <div id="engagement-info" class="notice">Checking local engagement configuration…</div>
+        <div class="controls" style="margin-top:16px">
+          <input id="approval-token" type="password" class="select" autocomplete="off" placeholder="Approval token">
+          <button id="engagement-run" class="primary" type="button" disabled>Run approved checks</button>
+        </div>
+        <p id="engagement-result" class="help" aria-live="polite">Requires bank-approved staging Rules of Engagement.</p>
+        <pre id="engagement-evidence" class="mono">No checks executed.</pre>
+      </section>
+    </div>
+</main>
 </div>
 <script>
   const el = id => document.getElementById(id);
@@ -99,12 +129,12 @@
       const item = document.createElement('div'); item.className='finding';
       const head = document.createElement('div'); head.className='finding-head';
       asText(head,'div', f.title,'finding-title');
-      asText(head,'span',f.risk.toUpperCase(),'pill bad');
+      asText(head,'span',(f.risk||'review').toUpperCase(),'pill bad');
       item.append(head);
-      asText(item,'p',f.workflow+' · '+f.status.replaceAll('_',' '));
+      asText(item,'p',(f.workflow||f.probe_id||'Authorization check')+' · '+f.status.replaceAll('_',' '));
       findings.append(item);
     }
-    el('evidence').textContent = JSON.stringify(data.observations.map(o=>o.evidence), null, 2);
+    el('evidence').textContent = JSON.stringify(data.observations.map(o=>o.evidence || o), null, 2);
     const verification = await json('/api/runs/'+encodeURIComponent(data.id)+'/verify');
     el('verification').textContent = 'Run '+data.id.slice(0,8)+' · hash chain: '+(verification.verified?'verified':'FAILED')+' (not immutable/WORM evidence)';
   }
@@ -130,6 +160,58 @@
   });
   json('/api/model').then(model=>{el('invariants').textContent=model.graph.invariants.length;}).catch(()=>{});
   history().catch(e=>{el('history').textContent='Cannot load saved runs: '+e.message;});
+
+  async function refreshSpecs() {
+    const specs=await json('/api/specs'), select=el('spec-choice');
+    select.replaceChildren();
+    for(const s of specs){const opt=document.createElement('option');opt.value=s.id;opt.textContent=s.source+' · '+s.operation_count+' operations';select.append(opt);}
+    el('spec-plan').disabled=!specs.length;el('spec-reason').disabled=!specs.length;
+  }
+  async function viewPlan(){
+    try{
+      const id=el('spec-choice').value;if(!id)return;
+      el('spec-output').textContent=JSON.stringify(await json('/api/specs/'+encodeURIComponent(id)+'/hypotheses'),null,2);
+    }catch(e){el('spec-output').textContent='Cannot load plan: '+e.message;}
+  }
+  el('spec-import').addEventListener('click',async()=>{
+    const file=el('spec-file').files[0];
+    if(!file||file.size>1000000){el('spec-status').textContent='Choose a JSON file below 1 MB.';return;}
+    try{
+      const document=JSON.parse(await file.text());
+      const result=await json('/api/specs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:el('spec-source').value,document})});
+      el('spec-status').textContent='Imported '+result.operation_count+' operations.';
+      await refreshSpecs();el('spec-choice').value=result.id;await viewPlan();
+    }catch(e){el('spec-status').textContent='Import failed: '+e.message;}
+  });
+  el('spec-plan').addEventListener('click',viewPlan);
+  el('spec-reason').addEventListener('click',async()=>{
+    try{
+      const id=el('spec-choice').value;
+      el('spec-output').textContent=JSON.stringify(await json('/api/specs/'+encodeURIComponent(id)+'/reason',{method:'POST'}),null,2);
+    }catch(e){el('spec-output').textContent='Local AI unavailable: '+e.message;}
+  });
+  async function loadEngagement(){
+    try{
+      const cfg=await json('/api/engagement');
+      if(!cfg.configured){el('engagement-info').textContent='Not configured: no staging requests can be sent.';return;}
+      el('engagement-info').textContent=cfg.title+' · '+cfg.probes.length+' approved GET probes · '+(cfg.execution_enabled?'enabled':'disabled');
+      el('engagement-run').disabled=!cfg.execution_enabled;
+    }catch(e){el('engagement-info').textContent='Invalid configuration: '+e.message;}
+  }
+  el('engagement-run').addEventListener('click',async()=>{
+    const button=el('engagement-run'),token=el('approval-token').value;
+    if(!token){el('engagement-result').textContent='Operator approval token required.';return;}
+    button.disabled=true;
+    try{
+      const run=await json('/api/engagement/execute',{method:'POST',headers:{'x-hypothesis-admin-token':token}});
+      el('engagement-result').textContent='Completed '+run.summary.hypotheses+' checks. '+run.summary.potential_findings+' potential findings require review.';
+      el('engagement-evidence').textContent=JSON.stringify(run.observations,null,2);
+      await history();
+    }catch(e){el('engagement-result').textContent='Execution rejected: '+e.message;}
+    finally{el('approval-token').value='';button.disabled=false;}
+  });
+  refreshSpecs().catch(()=>{el('spec-status').textContent='Could not load specifications.';});
+  loadEngagement();
 </script>
 </body>
 </html>
